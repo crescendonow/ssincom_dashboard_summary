@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login - S&S Incom</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --charcoal: #202020;
+      --gold: #c8a96e;
+      --gold-light: #e8d5a3;
+      --border: #ded9cc;
+      --muted: #686868;
+      --danger: #b42318;
+      --surface: #ffffff;
+      --bg: #f4f2ec;
+    }
+    body {
+      min-height: 100vh;
+      font-family: 'Kanit', sans-serif;
+      background:
+        linear-gradient(135deg, rgba(32,32,32,0.95), rgba(48,43,32,0.9)),
+        radial-gradient(circle at 70% 20%, rgba(200,169,110,0.24), transparent 32%),
+        var(--bg);
+      color: var(--charcoal);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .login-card {
+      width: min(100%, 390px);
+      background: var(--surface);
+      border: 1px solid rgba(200,169,110,0.35);
+      border-top: 4px solid var(--gold);
+      border-radius: 8px;
+      box-shadow: 0 22px 60px rgba(0,0,0,0.28);
+      padding: 30px;
+    }
+    .brand { text-align: center; margin-bottom: 22px; }
+    .brand strong { display: block; color: var(--gold); letter-spacing: 0.7px; font-size: 1.25rem; }
+    .brand span { display: block; color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
+    h1 { font-size: 1.35rem; font-weight: 600; text-align: center; margin-bottom: 6px; }
+    .hint { text-align: center; color: var(--muted); font-size: 0.88rem; margin-bottom: 20px; }
+    .error {
+      display: none;
+      color: var(--danger);
+      background: #fff0ed;
+      border: 1px solid #ffd0c8;
+      border-radius: 6px;
+      padding: 9px 12px;
+      font-size: 0.86rem;
+      margin-bottom: 14px;
+    }
+    .error.is-visible { display: block; }
+    form { display: grid; gap: 14px; }
+    label { display: block; color: #4b4b4b; font-size: 0.86rem; margin-bottom: 5px; }
+    input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 11px 12px;
+      font: inherit;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(200,169,110,0.16); }
+    .password-wrap { position: relative; }
+    .password-wrap input { padding-right: 64px; }
+    .toggle-pw {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      border: 0;
+      background: transparent;
+      color: #8a6420;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 6px;
+    }
+    .submit-btn {
+      border: 0;
+      border-radius: 5px;
+      background: var(--gold);
+      color: var(--charcoal);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 600;
+      padding: 12px 16px;
+      transition: opacity 0.2s;
+      margin-top: 4px;
+    }
+    .submit-btn:hover { opacity: 0.9; }
+    .submit-btn:disabled { opacity: 0.6; cursor: wait; }
+    .back-link {
+      display: block;
+      text-align: center;
+      margin-top: 18px;
+      color: #8a6420;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .back-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <main class="login-card">
+    <div class="brand">
+      <strong>S&S INCOM</strong>
+      <span>Dashboard Access</span>
+    </div>
+    <h1>เข้าสู่ระบบ</h1>
+    <p class="hint">กรุณาเข้าสู่ระบบเพื่อดูข้อมูล Dashboard</p>
+
+    <div class="error" id="loginError">ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง</div>
+
+    <form id="loginForm" method="post" action="/login">
+      <input type="hidden" name="next" id="nextPath" value="/frontend/">
+      <div>
+        <label for="username">ผู้ใช้</label>
+        <input id="username" name="username" autocomplete="username" required autofocus>
+      </div>
+      <div>
+        <label for="password">รหัสผ่าน</label>
+        <div class="password-wrap">
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+          <button class="toggle-pw" id="togglePw" type="button">แสดง</button>
+        </div>
+      </div>
+      <button class="submit-btn" id="loginSubmit" type="submit">เข้าสู่ระบบ</button>
+    </form>
+
+    <a class="back-link" href="/frontend/">กลับหน้าหลัก</a>
+  </main>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next") || "/frontend/";
+      const form = document.getElementById("loginForm");
+      const nextInput = document.getElementById("nextPath");
+      const error = document.getElementById("loginError");
+      const password = document.getElementById("password");
+      const toggle = document.getElementById("togglePw");
+      const submit = document.getElementById("loginSubmit");
+
+      nextInput.value = next;
+      error.classList.toggle("is-visible", params.has("error"));
+
+      toggle.addEventListener("click", () => {
+        const visible = password.type === "text";
+        password.type = visible ? "password" : "text";
+        toggle.textContent = visible ? "แสดง" : "ซ่อน";
+      });
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        submit.disabled = true;
+
+        try {
+          const response = await fetch("/login", {
+            method: "POST",
+            body: new FormData(form),
+            credentials: "same-origin",
+          });
+
+          if (response.redirected) {
+            window.location.href = response.url;
+            return;
+          }
+
+          window.location.href = next;
+        } catch (err) {
+          window.location.href = `/login?error=1&next=${encodeURIComponent(next)}`;
+        } finally {
+          submit.disabled = false;
+        }
+      });
+    });
+  </script>
+</body>
+</html>
