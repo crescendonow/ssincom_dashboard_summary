@@ -612,6 +612,7 @@
   <div class="table-card">
     <h3>สรุปครึ่งปี / รายปี</h3>
     <table id="table-compare"></table>
+    <p id="cmp-note" style="font-size:.78rem;color:var(--text-muted);margin-top:10px;"></p>
   </div>
 </div>
 
@@ -1545,8 +1546,30 @@ let chartHalfBar, chartYearBar;
 function renderCompare() {
   const metric = document.getElementById('cmp-metric').value;
   const byYear = {}, byHalf = {};
+
+  // ปีที่ปิดรอบแล้ว (มีข้อมูลอ้างอิงที่ตรวจสอบแล้วใน HISTORICAL_SALES/VOLUME) ใช้ข้อมูลอ้างอิงเสมอ
+  // ห้ามใช้ appData สำหรับปีเหล่านี้ — บิลในฐานข้อมูลสดของปีเก่าบางส่วนวันที่ผิดพลาด/ไม่ครบ
+  // ทำให้ยอดคลาดเคลื่อนถ้านำมาคำนวณแทนข้อมูลอ้างอิง (ดู renderYearTrend สำหรับ pattern เดียวกัน)
+  const histYears = typeof HISTORICAL_SALES !== 'undefined' ? new Set(HISTORICAL_SALES.map(r=>r[0])) : new Set();
+  histYears.forEach(y=>{ byYear[y] = blankAcc(); byHalf[y] = {1:blankAcc(), 2:blankAcc()}; });
+  if(typeof HISTORICAL_SALES !== 'undefined') {
+    HISTORICAL_SALES.forEach(([y,m,val,vat,tot])=>{
+      const h = m<=6 ? 1 : 2;
+      byYear[y].total+=tot; byYear[y].value+=val; byYear[y].vat+=vat;
+      byHalf[y][h].total+=tot; byHalf[y][h].value+=val; byHalf[y][h].vat+=vat;
+    });
+  }
+  if(typeof HISTORICAL_VOLUME !== 'undefined') {
+    HISTORICAL_VOLUME.forEach(([y,m,pi,t])=>{
+      if(!histYears.has(y)) return;
+      byYear[y].qty += t; byHalf[y][m<=6?1:2].qty += t;
+    });
+  }
+
+  // ปีปัจจุบัน/ปีที่ยังไม่มีข้อมูลอ้างอิง ใช้ข้อมูลสดจาก appData เท่านั้น (ตัดแถวที่วันที่ผิดพลาด y=0 ทิ้ง)
   appData.forEach(r=>{
     const y = rowYear(r);
+    if(!y || histYears.has(y)) return;
     const h = r.month<=6 ? 1 : 2;
     (byYear[y] ||= blankAcc()); accInto(byYear[y], r);
     (byHalf[y] ||= {1:blankAcc(), 2:blankAcc()}); accInto(byHalf[y][h], r);
@@ -1587,6 +1610,13 @@ function renderCompare() {
   });
   html += `</tbody>`;
   document.getElementById('table-compare').innerHTML = html;
+
+  const cmpNote = document.getElementById('cmp-note');
+  if(cmpNote) {
+    cmpNote.textContent = (metric === 'count' && years.some(y=>histYears.has(y)))
+      ? 'หมายเหตุ: "จำนวนรายการ" นับได้เฉพาะปีที่ดึงจากฐานข้อมูลสด — ปีเก่าที่ใช้ข้อมูลอ้างอิง (สรุปขายทราย) ไม่มีจำนวนรายการรายบิลเก็บไว้ จึงแสดงเป็น 0'
+      : '';
+  }
 }
 
 // ========== HISTORICAL VOLUME (tons) 2560-2568 ==========
