@@ -9,6 +9,7 @@ from sqlalchemy import String, cast, or_
 from sqlalchemy.orm import Session
 
 from . import models
+from .customer_names import clean_customer_name
 from .database import SessionLocal
 from .product_groups import group_of
 
@@ -34,6 +35,7 @@ def sales_rows(request: Request, db: Session = Depends(get_db)):
     inv = models.Invoice
     itm = models.InvoiceItem
     drv = models.Driver
+    cust = models.CustomerList
 
     q = (
         db.query(
@@ -50,6 +52,9 @@ def sales_rows(request: Request, db: Session = Depends(get_db)):
             drv.prefix,
             drv.first_name,
             drv.last_name,
+            cust.fname.label("cust_fname"),
+            cust.cf_hq,
+            cust.cf_branch,
         )
         .join(
             itm,
@@ -59,6 +64,7 @@ def sales_rows(request: Request, db: Session = Depends(get_db)):
             ),
         )
         .outerjoin(drv, inv.driver_id == drv.driver_id)
+        .outerjoin(cust, inv.personid == cust.personid)
         .order_by(inv.invoice_date.asc(), inv.idx.asc(), itm.idx.asc())
     )
 
@@ -77,6 +83,9 @@ def sales_rows(request: Request, db: Session = Depends(get_db)):
         dpre,
         dfirst,
         dlast,
+        cust_fname,
+        cf_hq,
+        cf_branch,
     ) in q.all():
         qraw = float(quantity or 0.0)
         price = float(price or 0.0)
@@ -103,7 +112,7 @@ def sales_rows(request: Request, db: Session = Depends(get_db)):
                 "no": str(len(rows) + 1),
                 "date": date_str,
                 "month": month,
-                "customer": fname,
+                "customer": clean_customer_name(cust_fname or fname, cf_hq, cf_branch),
                 "itemId": cf_itemid,
                 "itemName": cf_itemname,
                 "groupId": group_id,

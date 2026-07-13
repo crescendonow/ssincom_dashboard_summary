@@ -43,6 +43,19 @@ class InvoiceItem(Base):
     amount = Column(Float)                           # จำนวนเงิน (null → คำนวณ qty*price)
 
 
+# ------------------ Customers (schema: products) ------------------
+
+class CustomerList(Base):
+    __tablename__ = "customer_list"
+    __table_args__ = {"schema": "products"}
+
+    idx = Column(Integer, primary_key=True)
+    personid = Column(String, index=True)     # รหัสลูกค้า — join กับ invoices.personid
+    fname = Column(String)                     # ชื่อลูกค้า (master, สะอาดกว่า invoices.fname snapshot)
+    cf_hq = Column(Integer)                     # 1 = สำนักงานใหญ่
+    cf_branch = Column(String)                  # รหัสสาขา (ถ้าไม่ใช่สำนักงานใหญ่)
+
+
 # ------------------ Drivers (schema: products) ------------------
 
 class Driver(Base):
