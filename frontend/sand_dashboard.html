@@ -441,6 +441,8 @@
   </div>
 </div>
 
+<div id="closed-year-banner" class="badge" style="display:none;margin:0 24px 12px;"></div>
+
 <main>
 
 <!-- TAB 1: OVERVIEW -->
@@ -466,6 +468,7 @@
   <div class="table-card">
     <h3>สรุปยอดขายรายเดือน</h3>
     <table id="table-monthly"></table>
+    <p id="overview-note" style="font-size:.78rem;color:var(--text-muted);margin-top:10px;"></p>
   </div>
 </div>
 
@@ -780,8 +783,17 @@ function fmtInt(n) { return n.toLocaleString('th-TH'); }
 function rowYear(r) { return parseInt(String(r.date).split('/')[2]) || 0; }
 
 // ปีทั้งหมดที่มีในข้อมูล (ไม่ถูกกรองด้วยปีที่เลือก) — ใช้เติม dropdown #year-filter และแท็บเทียบครึ่งปี/รายปี
+// รวมปีที่ปิดรอบแล้ว (มีข้อมูลอ้างอิงใน HISTORICAL_SALES 2560-2568) เข้าไปด้วย แม้ appData สด
+// จะไม่มี/มีไม่ครบก็ตาม — เพื่อให้เลือกปีเก่าดูสรุปได้ที่แท็บภาพรวม/เทียบครึ่งปี-รายปี/แนวโน้มตัน
 function getYears() {
-  return [...new Set(appData.map(rowYear))].sort((a,b)=>a-b);
+  const hist = typeof HISTORICAL_SALES !== 'undefined' ? HISTORICAL_SALES.map(r=>r[0]) : [];
+  return [...new Set([...hist, ...appData.map(rowYear)])].filter(y=>y).sort((a,b)=>a-b);
+}
+
+// ปีที่ "ปิดรอบแล้ว" มีข้อมูลอ้างอิงที่ตรวจสอบแล้ว (HISTORICAL_SALES/VOLUME) — ห้ามใช้ appData
+// แทนสำหรับปีเหล่านี้ เพราะบิลในฐานข้อมูลสดของปีเก่าบางส่วนวันที่ผิดพลาด/ไม่ครบ (ดู renderCompare)
+function isClosedYear(y) {
+  return typeof HISTORICAL_SALES !== 'undefined' && HISTORICAL_SALES.some(r=>r[0]===y);
 }
 
 // ข้อมูลเฉพาะปีที่เลือก — ใช้กับทุกแท็บยกเว้นแท็บเทียบครึ่งปี/รายปี (ซึ่งต้องดูหลายปีพร้อมกัน)
@@ -915,25 +927,48 @@ function populateSelects() {
 // ========== TAB 1: OVERVIEW ==========
 let chartMonthlyBar, chartQtyLine;
 
+// ปีที่ปิดรอบแล้ว (2560-2568) ใช้ HISTORICAL_SALES/VOLUME เสมอ — appData สดของปีเก่าอาจไม่ครบ
+// (ดู pattern เดียวกันใน renderCompare/renderVolume/renderSizeReport)
 function renderOverview() {
-  const months = getMonths();
-  const data = yearData();
+  const closed = isClosedYear(selectedYear);
+  const months = closed ? [1,2,3,4,5,6,7,8,9,10,11,12] : getMonths();
   const monthly = {};
   months.forEach(m=>{ monthly[m]={total:0,value:0,qty:0,count:0,vat:0}; });
-  data.forEach(r=>{
-    monthly[r.month].total += r.total;
-    monthly[r.month].value += r.value;
-    monthly[r.month].qty += r.qty;
-    monthly[r.month].count += 1;
-    monthly[r.month].vat += r.vat;
-  });
 
-  const grandTotal = data.reduce((s,r)=>s+r.total,0);
-  const grandQty = data.reduce((s,r)=>s+r.qty,0);
-  const grandCount = data.length;
-  const grandValue = data.reduce((s,r)=>s+r.value,0);
-  const groups = getGroups();
-  
+  let grandCount = null;
+  let groupCount;
+
+  if(closed) {
+    HISTORICAL_SALES.forEach(([y,m,val,vat,tot])=>{
+      if(y!==selectedYear) return;
+      monthly[m].value += val; monthly[m].vat += vat; monthly[m].total += tot;
+    });
+    const prodSet = new Set();
+    if(typeof HISTORICAL_VOLUME !== 'undefined') {
+      HISTORICAL_VOLUME.forEach(([y,m,pi,t])=>{
+        if(y!==selectedYear) return;
+        monthly[m].qty += t;
+        prodSet.add(pi);
+      });
+    }
+    groupCount = prodSet.size;
+  } else {
+    const data = yearData();
+    data.forEach(r=>{
+      monthly[r.month].total += r.total;
+      monthly[r.month].value += r.value;
+      monthly[r.month].qty += r.qty;
+      monthly[r.month].count += 1;
+      monthly[r.month].vat += r.vat;
+    });
+    grandCount = data.length;
+    groupCount = getGroups().length;
+  }
+
+  const grandTotal = months.reduce((s,m)=>s+monthly[m].total,0);
+  const grandQty = months.reduce((s,m)=>s+monthly[m].qty,0);
+  const grandValue = months.reduce((s,m)=>s+monthly[m].value,0);
+
   // KPI
   document.getElementById('kpi-grid').innerHTML = `
     <div class="kpi-card">
@@ -953,12 +988,12 @@ function renderOverview() {
     </div>
     <div class="kpi-card">
       <div class="label">จำนวนรายการ</div>
-      <div class="value">${fmtInt(grandCount)}</div>
+      <div class="value">${grandCount===null ? '—' : fmtInt(grandCount)}</div>
       <div class="sub">รายการ</div>
     </div>
     <div class="kpi-card red">
       <div class="label">จำนวนประเภทสินค้า</div>
-      <div class="value">${groups.length}</div>
+      <div class="value">${groupCount}</div>
       <div class="sub">ประเภทขนาดทราย</div>
     </div>
     <div class="kpi-card green">
@@ -1018,7 +1053,7 @@ function renderOverview() {
     const d = monthly[m];
     html += `<tr>
       <td>${MONTH_NAMES[m]||m}</td>
-      <td class="num">${fmtInt(d.count)}</td>
+      <td class="num">${closed ? '—' : fmtInt(d.count)}</td>
       <td class="num">${fmt(d.qty)}</td>
       <td class="num">${fmt(d.value)}</td>
       <td class="num">${fmt(d.vat)}</td>
@@ -1027,13 +1062,21 @@ function renderOverview() {
   });
   html += `</tbody><tfoot><tr>
     <td><strong>รวมทั้งหมด</strong></td>
-    <td class="num"><strong>${fmtInt(grandCount)}</strong></td>
+    <td class="num"><strong>${grandCount===null ? '—' : fmtInt(grandCount)}</strong></td>
     <td class="num"><strong>${fmt(grandQty)}</strong></td>
     <td class="num"><strong>${fmt(grandValue)}</strong></td>
     <td class="num"><strong>${fmt(grandTotal-grandValue)}</strong></td>
     <td class="num"><strong>${fmt(grandTotal)}</strong></td>
   </tr></tfoot>`;
   document.getElementById('table-monthly').innerHTML = html;
+
+  const ovNote = document.getElementById('overview-note');
+  if(ovNote) {
+    ovNote.textContent = closed
+      ? `ปี ${selectedYear} ปิดรอบแล้ว — ยอดขาย/ปริมาณตันใช้ข้อมูลอ้างอิง (สรุปขายทราย 2560–2568) แทนฐานข้อมูลสด `
+        + `ซึ่งอาจมีบิลของปีนี้ไม่ครบ; "จำนวนรายการ" ไม่มีเก็บไว้ในข้อมูลอ้างอิงจึงแสดงเป็น "—"`
+      : '';
+  }
 
   renderYearTrend();
 }
@@ -1934,8 +1977,24 @@ function readCache() {
   }
 }
 
+// ปีปิดรอบที่ไม่มีบิลรายรายการในฐานข้อมูลสด (appData) — เตือนว่าแท็บระดับรายการ
+// (กราฟแยกประเภท/รายเดือน/ลูกค้า/คนขับ/สินค้าขายดี/รายละเอียด) จะไม่มีข้อมูลให้แสดง
+function updateClosedYearBanner() {
+  const banner = document.getElementById('closed-year-banner');
+  if(!banner) return;
+  if(isClosedYear(selectedYear) && yearData().length===0) {
+    banner.style.display = 'block';
+    banner.textContent = `ปี ${selectedYear} ปิดรอบแล้วและไม่มีบิลรายรายการในฐานข้อมูลสด — แท็บที่ต้องใช้ข้อมูลระดับรายการ `
+      + `(กราฟแยกประเภท / ยอดขายรายเดือน / ตามลูกค้า / ตามคนขับ / สินค้าขายดี / รายละเอียด) จะไม่มีข้อมูลแสดง `
+      + `ดูสรุปยอดขาย/ปริมาณตันปีนี้ได้ที่แท็บภาพรวม, เทียบครึ่งปี-รายปี, แนวโน้มตัน 60-68 หรือรายงานขายทรายตามขนาด`;
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
 function renderAll() {
   populateSelects();
+  updateClosedYearBanner();
   renderOverview();
   renderCharts();
   renderPivot();
