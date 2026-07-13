@@ -402,6 +402,10 @@
       <span class="icon">📉</span><span>แนวโน้มตัน 60-68</span>
       <span class="nav-badge">ใหม่</span>
     </a>
+    <a class="nav-item" data-page="sizereport" onclick="showTab('sizereport', this)">
+      <span class="icon">📐</span><span>รายงานขายทรายตามขนาด</span>
+      <span class="nav-badge">ใหม่</span>
+    </a>
 
     <div class="nav-section-title">อื่นๆ</div>
     <a class="nav-item" data-page="detail" onclick="showTab('detail', this)">
@@ -647,6 +651,26 @@
   </div>
 </div>
 
+<!-- TAB: SAND SIZE REPORT -->
+<div id="tab-sizereport" class="tab-panel">
+  <div class="filter-bar">
+    <span class="badge">ปริมาณ (ตัน) แยกตามประเภทขนาดทราย — ปีที่ปิดรอบใช้ข้อมูลอ้างอิง 2560–2568, ปีปัจจุบันดึงจากฐานข้อมูลสด</span>
+    <label>ปี:</label>
+    <select id="sizerep-year" onchange="renderSizeReport()"></select>
+    <label>ช่วงเวลา:</label>
+    <select id="sizerep-period" onchange="renderSizeReport()">
+      <option value="h1">ครึ่งปีแรก (ม.ค.–มิ.ย.)</option>
+      <option value="h2">ครึ่งปีหลัง (ก.ค.–ธ.ค.)</option>
+      <option value="full">ทั้งปี (ม.ค.–ธ.ค.)</option>
+    </select>
+  </div>
+  <div class="table-card">
+    <h3 id="sizerep-title">สรุปรายละเอียดขายทราย</h3>
+    <table id="table-sizerep"></table>
+    <p id="sizerep-note" style="font-size:.78rem;color:var(--text-muted);margin-top:10px;"></p>
+  </div>
+</div>
+
 <!-- TAB 4: DETAIL -->
 <div id="tab-detail" class="tab-panel">
   <div class="filter-bar">
@@ -694,10 +718,12 @@
     <h3>⬇️ Export ข้อมูล</h3>
     <p style="color:var(--text-muted);font-size:.88rem;margin-bottom:16px;">Export ข้อมูลที่กำลังแสดงอยู่ในขณะนี้ (รวม filter ที่ตั้งไว้)</p>
     <div class="filter-bar" style="margin-bottom:16px;">
-      <label>เดือน:</label>
-      <select id="export-month">
-        <option value="0">ทุกเดือน</option>
-      </select>
+      <label>จากเดือน/ปี:</label>
+      <select id="export-from-month"></select>
+      <select id="export-from-year"></select>
+      <label>ถึงเดือน/ปี:</label>
+      <select id="export-to-month"></select>
+      <select id="export-to-year"></select>
       <label>ประเภททราย:</label>
       <select id="export-type">
         <option value="0">ทุกประเภท</option>
@@ -795,6 +821,7 @@ const PAGE_TITLES = {
   topitems:  {title:'สินค้าขายดี',             subtitle:'อันดับสินค้าขายดีที่สุด'},
   compare:   {title:'เทียบครึ่งปี/รายปี',      subtitle:'เปรียบเทียบข้อมูลครึ่งปีและรายปี'},
   volume:    {title:'แนวโน้มตันย้อนหลัง 60-68', subtitle:'ปริมาณขาย (ตัน) ปี 2560–2568'},
+  sizereport:{title:'รายงานขายทรายตามขนาด',     subtitle:'ปริมาณ (ตัน) แยกตามประเภทขนาดทราย รายเดือน — ครึ่งปี/ทั้งปี'},
   detail:    {title:'รายละเอียด',              subtitle:'ดูรายละเอียดข้อมูลทั้งหมด'},
   upload:    {title:'อัปโหลด / Export',        subtitle:'นำเข้าไฟล์ CSV และ Export ข้อมูล'},
 };
@@ -843,7 +870,7 @@ function populateSelects() {
   const months = getMonths();
   const groups = getGroups();
 
-  ['chart-month-filter','detail-month','export-month','cust-month'].forEach(id=>{
+  ['chart-month-filter','detail-month','cust-month'].forEach(id=>{
     const sel = document.getElementById(id);
     if(!sel) return;
     const cur = sel.value;
@@ -851,7 +878,32 @@ function populateSelects() {
     months.forEach(m=>{ sel.innerHTML += `<option value="${m}">${MONTH_NAMES[m]||m}</option>`; });
     sel.value = cur || '0';
   });
-  
+
+  // ช่วงเวลา Export: จากเดือน/ปี – ถึงเดือน/ปี ครอบคลุมทุกปีที่มีข้อมูล (ไม่ผูกกับ #year-filter)
+  const exFromY = document.getElementById('export-from-year');
+  const exToY = document.getElementById('export-to-year');
+  const exFromM = document.getElementById('export-from-month');
+  const exToM = document.getElementById('export-to-month');
+  if(exFromY && !exFromY.options.length) {
+    const yOpts = years.map(y=>`<option value="${y}">${y}</option>`).join('');
+    const mOpts = [1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}">${MONTH_NAMES[m]}</option>`).join('');
+    exFromY.innerHTML = yOpts; exToY.innerHTML = yOpts;
+    exFromM.innerHTML = mOpts; exToM.innerHTML = mOpts;
+
+    let minY=null,minM=null,maxY=null,maxM=null,minKey=Infinity,maxKey=-Infinity;
+    appData.forEach(r=>{
+      const yy = rowYear(r);
+      if(!yy) return;
+      const k = yy*100+r.month;
+      if(k<minKey){minKey=k;minY=yy;minM=r.month;}
+      if(k>maxKey){maxKey=k;maxY=yy;maxM=r.month;}
+    });
+    exFromY.value = minY!=null ? minY : years[0];
+    exFromM.value = minM!=null ? minM : 1;
+    exToY.value = maxY!=null ? maxY : years[years.length-1];
+    exToM.value = maxM!=null ? maxM : 12;
+  }
+
   ['detail-type','export-type'].forEach(id=>{
     const sel = document.getElementById(id);
     if(!sel) return;
@@ -1335,10 +1387,27 @@ function loadFile(file) {
 }
 
 // ========== EXPORT ==========
+function filterDataRange(fromY, fromM, toY, toM, typeFilter) {
+  const fromKey = fromY*100+fromM, toKey = toY*100+toM;
+  return appData.filter(r=>{
+    const yy = rowYear(r);
+    if(!yy) return false;
+    const k = yy*100+r.month;
+    return k>=fromKey && k<=toKey && (typeFilter==0 || r.groupId==typeFilter);
+  });
+}
+
 function exportData(format) {
-  const mf = parseInt(document.getElementById('export-month').value);
+  const fromY = parseInt(document.getElementById('export-from-year').value);
+  const fromM = parseInt(document.getElementById('export-from-month').value);
+  const toY = parseInt(document.getElementById('export-to-year').value);
+  const toM = parseInt(document.getElementById('export-to-month').value);
   const tf = parseInt(document.getElementById('export-type').value);
-  const data = filterData(mf, tf);
+  if(fromY*100+fromM > toY*100+toM) {
+    document.getElementById('export-note').textContent = 'ช่วงเวลาไม่ถูกต้อง: "จาก" ต้องมาก่อน "ถึง"';
+    return;
+  }
+  const data = filterDataRange(fromY, fromM, toY, toM, tf);
   
   if(data.length==0) {
     document.getElementById('export-note').textContent = '⚠️ ไม่มีข้อมูลที่จะ export';
@@ -1348,8 +1417,8 @@ function exportData(format) {
   const rows = [['No.','วันที่','ลูกค้า','รหัสสินค้า','ชื่อสินค้า','รหัสกลุ่ม','ประเภทสินค้า','ปริมาณ (ตัน)','ยอดขาย (ก่อน VAT)','VAT','ยอดรวม','คนขับ']];
   data.forEach(r=>rows.push([r.no,r.date,r.customer,r.itemId,r.itemName,r.groupId,r.groupName,r.qty,r.value,r.vat,r.total,r.driver]));
   
-  const mLabel = mf==0?'ทุกเดือน':(MONTH_NAMES[mf]||mf);
-  const filename = `ยอดขายทราย_${mLabel}_${new Date().toISOString().slice(0,10)}`;
+  const rangeLabel = `${MONTH_SHORT[fromM].replace('.','')}${fromY}-${MONTH_SHORT[toM].replace('.','')}${toY}`;
+  const filename = `ยอดขายทราย_${rangeLabel}_${new Date().toISOString().slice(0,10)}`;
   
   if(format=='csv') {
     const csv = rows.map(row=>row.map(v=>`"${v}"`).join(',')).join('\n');
@@ -1369,23 +1438,27 @@ function exportData(format) {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'ยอดขาย');
     
-    // Add summary sheet
-    const months = getMonths();
+    // Add summary sheet - group by year+month, sorted chronologically (range may span multiple years)
     const monthly = {};
-    months.forEach(m=>{ monthly[m]={total:0,value:0,qty:0,count:0,vat:0}; });
+    const ymKeys = [];
     data.forEach(r=>{
-      monthly[r.month].total += r.total;
-      monthly[r.month].value += r.value;
-      monthly[r.month].qty += r.qty;
-      monthly[r.month].count += 1;
-      monthly[r.month].vat += r.vat;
+      const yy = rowYear(r);
+      const key = yy*100+r.month;
+      if(!monthly[key]) { monthly[key]={year:yy,month:r.month,total:0,value:0,qty:0,count:0,vat:0}; ymKeys.push(key); }
+      monthly[key].total += r.total;
+      monthly[key].value += r.value;
+      monthly[key].qty += r.qty;
+      monthly[key].count += 1;
+      monthly[key].vat += r.vat;
     });
-    const sumRows = [['เดือน','จำนวนรายการ','ปริมาณ (ตัน)','ยอดขาย (ก่อน VAT)','VAT','ยอดรวม (บาท)']];
-    months.forEach(m=>{
-      if(monthly[m].count>0) sumRows.push([MONTH_NAMES[m]||m,monthly[m].count,monthly[m].qty,monthly[m].value,monthly[m].vat,monthly[m].total]);
+    ymKeys.sort((a,b)=>a-b);
+    const sumRows = [['เดือน','ปี (พ.ศ.)','จำนวนรายการ','ปริมาณ (ตัน)','ยอดขาย (ก่อน VAT)','VAT','ยอดรวม (บาท)']];
+    ymKeys.forEach(key=>{
+      const mo = monthly[key];
+      sumRows.push([MONTH_NAMES[mo.month]||mo.month, mo.year, mo.count, mo.qty, mo.value, mo.vat, mo.total]);
     });
     const ws2 = XLSX.utils.aoa_to_sheet(sumRows);
-    ws2['!cols'] = [{wch:15},{wch:14},{wch:14},{wch:22},{wch:16},{wch:22}];
+    ws2['!cols'] = [{wch:15},{wch:10},{wch:14},{wch:14},{wch:22},{wch:16},{wch:22}];
     XLSX.utils.book_append_sheet(wb, ws2, 'สรุปรายเดือน');
     
     XLSX.writeFile(wb, filename+'.xlsx');
@@ -1740,6 +1813,81 @@ function renderVolume() {
 
 function onVolYearChange() { renderVolume(); }
 
+// ========== TAB: SAND SIZE REPORT ==========
+// ปีที่ปิดรอบแล้ว (อยู่ใน HISTORICAL_VOLUME) ใช้ข้อมูลอ้างอิงแยกตาม HV_PRODUCTS เสมอ
+// ปีที่ยังไม่ปิดรอบ (ปีปัจจุบัน) ไม่มีข้อมูลอ้างอิง จึงดึงจาก appData สด แยกตาม groupName (กลุ่มขนาดทราย)
+function sizeReportYears() {
+  const hv = typeof HISTORICAL_VOLUME !== 'undefined' ? hvYears() : [];
+  return [...new Set([...hv, ...getYears()])].filter(y=>y).sort((a,b)=>a-b);
+}
+
+function renderSizeReport() {
+  const years = sizeReportYears();
+  if(!years.length) return;
+  const yearSel = document.getElementById('sizerep-year');
+  if(yearSel && !yearSel.options.length) {
+    yearSel.innerHTML = years.map(y=>`<option value="${y}">${y}</option>`).join('');
+    yearSel.value = years[years.length-1];
+  }
+  const y = yearSel && yearSel.value ? parseInt(yearSel.value) : years[years.length-1];
+  const periodSel = document.getElementById('sizerep-period');
+  const period = periodSel ? periodSel.value : 'full';
+
+  const histYears = typeof HISTORICAL_VOLUME !== 'undefined' ? new Set(HISTORICAL_VOLUME.map(r=>r[0])) : new Set();
+
+  const byProd = {};
+  const addQty = (label, m, t) => {
+    (byProd[label] ||= {}); byProd[label][m] = (byProd[label][m]||0) + t;
+  };
+
+  if(histYears.has(y)) {
+    HISTORICAL_VOLUME.forEach(([yy,m,pi,t])=>{
+      if(yy!==y) return;
+      addQty(HV_PRODUCTS[pi], m, t);
+    });
+  } else {
+    appData.forEach(r=>{
+      if(rowYear(r)!==y) return;
+      addQty(r.groupName, r.month, r.qty);
+    });
+  }
+
+  const monthsAll = period==='h1' ? [1,2,3,4,5,6] : period==='h2' ? [7,8,9,10,11,12] : [1,2,3,4,5,6,7,8,9,10,11,12];
+
+  const rows = Object.entries(byProd).map(([label,byM])=>{
+    const vals = monthsAll.map(m=>byM[m]||0);
+    const total = vals.reduce((s,v)=>s+v,0);
+    return {label, vals, total};
+  }).filter(r=>r.total>0).sort((a,b)=>b.total-a.total);
+
+  const colTotals = monthsAll.map((_,i)=>rows.reduce((s,r)=>s+r.vals[i],0));
+  const grand = colTotals.reduce((s,v)=>s+v,0);
+
+  const periodLabel = period==='h1' ? 'ครึ่งปีแรก (ม.ค.–มิ.ย.)' : period==='h2' ? 'ครึ่งปีหลัง (ก.ค.–ธ.ค.)' : 'ทั้งปี (ม.ค.–ธ.ค.)';
+  const titleEl = document.getElementById('sizerep-title');
+  if(titleEl) titleEl.textContent = `สรุปรายละเอียดขายทราย ปี ${y} — ${periodLabel} (ตัน)`;
+
+  let html = `<thead><tr><th style="width:48px;">ลำดับที่</th><th style="min-width:260px;">รายการ</th>
+    ${monthsAll.map(m=>`<th class="num">${MONTH_SHORT[m]||m}</th>`).join('')}
+    <th class="num">รวม</th></tr></thead><tbody>`;
+  rows.forEach((r,i)=>{
+    html += `<tr><td>${i+1}</td><td>${r.label}</td>
+      ${r.vals.map(v=>`<td class="num">${fmt(v)}</td>`).join('')}
+      <td class="num"><strong>${fmt(r.total)}</strong></td></tr>`;
+  });
+  html += `</tbody><tfoot><tr><td colspan="2"><strong>รวมทั้งสิ้น</strong></td>
+    ${colTotals.map(v=>`<td class="num"><strong>${fmt(v)}</strong></td>`).join('')}
+    <td class="num"><strong>${fmt(grand)}</strong></td></tr></tfoot>`;
+  document.getElementById('table-sizerep').innerHTML = html;
+
+  const note = document.getElementById('sizerep-note');
+  if(note) {
+    note.textContent = histYears.has(y)
+      ? 'ข้อมูลจากสรุปขายทราย (อ้างอิง) ปี 2560–2568 — แยกตามชื่อสินค้า/ขนาดที่บันทึกไว้'
+      : 'ปีนี้ยังไม่มีข้อมูลอ้างอิง จึงดึงจากฐานข้อมูลสด แยกตาม "ประเภทขนาดทราย" (กลุ่มสินค้า) แทนชื่อสินค้ารายตัว';
+  }
+}
+
 // ========== DATA SOURCE ==========
 const CACHE_KEY = 'ssincom_sales_cache_v1';
 
@@ -1796,6 +1944,7 @@ function renderAll() {
   renderTopItems();
   renderCompare();
   renderVolume();
+  renderSizeReport();
   renderDetail();
 }
 
