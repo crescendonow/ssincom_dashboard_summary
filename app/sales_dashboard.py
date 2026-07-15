@@ -3,6 +3,8 @@
 # ให้ตรง shape ที่ frontend/sand_dashboard.html ใช้ (แทนที่ EMBEDDED_DATA จาก xlsx)
 # logic คำนวณ (VAT 7%, qty→ตัน, join quirk idx::text, value=coalesce(amount,qty*price))
 # ยืมจาก ssincom_bill/app/saletax_report.py — read-only + auth-gated
+from collections import Counter
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import String, cast, or_
@@ -44,6 +46,7 @@ def sales_rows(request: Request, db: Session = Depends(get_db)):
             inv.invoice_date,
             inv.fname,
             itm.idx.label("item_idx"),
+            itm.invoice_number.label("item_invoice_number"),
             itm.cf_itemid,
             itm.cf_itemname,
             itm.quantity,
@@ -68,13 +71,32 @@ def sales_rows(request: Request, db: Session = Depends(get_db)):
         .order_by(inv.invoice_date.asc(), inv.idx.asc(), itm.idx.asc())
     )
 
+    all_rows = q.all()
+
+    # ป้องกัน item ถูกนับซ้ำจากบั๊ก join ข้างบน (⚠ quirk): ถ้า item_idx เดียวกันไป match
+    # invoice 2 ใบพร้อมกัน (ใบหนึ่งตรงแบบตรงๆ อีกใบตรงจาก idx-fallback) จะได้แถวซ้ำ
+    # กรณีปกติ (ไม่ซ้ำ) โค้ดนี้ไม่ทำอะไรเพิ่ม — คัดเฉพาะแถวที่ item_invoice_number ตรงกับ
+    # invoice_number จริง (ไม่ใช่ fallback จาก idx) ไว้เป็นตัวที่ถูกต้อง
+    item_idx_counts = Counter(r.item_idx for r in all_rows)
+    keep_inv_idx: dict = {}
+    for r in all_rows:
+        if item_idx_counts[r.item_idx] <= 1:
+            continue
+        is_direct = r.item_invoice_number is not None and r.item_invoice_number == r.invoice_number
+        chosen = keep_inv_idx.get(r.item_idx)
+        if chosen is None or (is_direct and not chosen[1]):
+            keep_inv_idx[r.item_idx] = (r.idx, is_direct)
+    if keep_inv_idx:
+        print(f"[sales_rows] resolved {len(keep_inv_idx)} OR-join duplicate item_idx: {sorted(keep_inv_idx)}")
+
     rows = []
     for (
-        _idx,
+        idx,
         _inv_no,
         inv_date,
         fname,
-        _item_idx,
+        item_idx,
+        _item_inv_no,
         cf_itemid,
         cf_itemname,
         quantity,
@@ -86,7 +108,9 @@ def sales_rows(request: Request, db: Session = Depends(get_db)):
         cust_fname,
         cf_hq,
         cf_branch,
-    ) in q.all():
+    ) in all_rows:
+        if item_idx in keep_inv_idx and idx != keep_inv_idx[item_idx][0]:
+            continue  # OR-join fallback duplicate ของ item นี้ — ใช้แถวที่ match ตรงแทน
         qraw = float(quantity or 0.0)
         price = float(price or 0.0)
         value = float(amount) if amount is not None else qraw * price
