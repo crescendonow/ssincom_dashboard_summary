@@ -4,6 +4,7 @@
 # logic คำนวณ (VAT 7%, qty→ตัน, join quirk idx::text, value=coalesce(amount,qty*price))
 # ยืมจาก ssincom_bill/app/saletax_report.py — read-only + auth-gated
 from collections import Counter
+from datetime import date
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -18,6 +19,11 @@ from .product_groups import group_of, is_known
 router = APIRouter()
 
 VAT_RATE = 0.07
+
+# ผู้ใช้ยืนยัน (16 ก.ค. 2569): ข้อมูลใน bill DB ก่อน 1 ม.ค. 2569 เป็น "ข้อมูลทดสอบระบบ" ตอน go-live
+# ไม่ใช่ยอดขายจริง (เช่น ใบ 6808090003-6808090015 ส.ค. 2568 ที่ไม่มีในรายงาน XLS ทางการ) — ตัดทิ้ง
+# จาก live query ทุกจุด. ปี 2568 บน dashboard ใช้ไฟล์รายงาน (closed month) อยู่แล้ว ไม่กระทบ.
+LIVE_DATA_START = date(2026, 1, 1)  # = 1 ม.ค. 2569 (พ.ศ.)
 
 
 def get_db():
@@ -68,6 +74,7 @@ def sales_rows(request: Request, db: Session = Depends(get_db)):
         )
         .outerjoin(drv, inv.driver_id == drv.driver_id)
         .outerjoin(cust, inv.personid == cust.personid)
+        .filter(inv.invoice_date >= LIVE_DATA_START)  # ตัดข้อมูลทดสอบก่อน 2569 ทิ้ง
         .order_by(inv.invoice_date.asc(), inv.idx.asc(), itm.idx.asc())
     )
 
