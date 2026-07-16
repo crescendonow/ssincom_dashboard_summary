@@ -209,3 +209,11 @@ def group_of(item_id: str | None) -> tuple[int, str]:
     if not item_id:
         return DEFAULT_GROUP
     return ITEM_TO_GROUP.get(str(item_id).strip(), DEFAULT_GROUP)
+
+
+def is_known(item_id: str | None) -> bool:
+    """True ถ้า item_id ถูกจัดกลุ่มไว้แล้วใน ITEM_TO_GROUP; False = จะตก DEFAULT_GROUP (กลุ่ม 16).
+    ใช้ตรวจจับ "รหัสสินค้าใหม่ที่ยังไม่จำแนก" แทนสัญญาณกลุ่ม "อื่นๆ" เดิมที่ถูกยกเลิกไป."""
+    if not item_id:
+        return False
+    return str(item_id).strip() in ITEM_TO_GROUP

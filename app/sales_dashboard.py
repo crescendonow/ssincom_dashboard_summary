@@ -7,13 +7,13 @@ from collections import Counter
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import String, cast, or_
+from sqlalchemy import String, cast, func, or_
 from sqlalchemy.orm import Session
 
 from . import models
 from .customer_names import clean_customer_name
 from .database import SessionLocal
-from .product_groups import group_of
+from .product_groups import group_of, is_known
 
 router = APIRouter()
 
@@ -89,6 +89,7 @@ def sales_rows(request: Request, db: Session = Depends(get_db)):
     if keep_inv_idx:
         print(f"[sales_rows] resolved {len(keep_inv_idx)} OR-join duplicate item_idx: {sorted(keep_inv_idx)}")
 
+    unmapped: dict = {}  # รหัสสินค้าที่ไม่อยู่ใน product_groups map (ตกกลุ่ม 16) — ไว้เตือน
     rows = []
     for (
         idx,
@@ -119,6 +120,11 @@ def sales_rows(request: Request, db: Session = Depends(get_db)):
         qty_ton = qraw / 1000.0 if qraw >= 1000 else qraw
 
         group_id, group_name = group_of(cf_itemid)
+        if not is_known(cf_itemid):
+            key = str(cf_itemid).strip() if cf_itemid else "(blank)"
+            u = unmapped.setdefault(key, {"itemName": cf_itemname, "count": 0, "value": 0.0})
+            u["count"] += 1
+            u["value"] += value
 
         driver = " ".join(
             p for p in [(dpre or "").strip(), (dfirst or "").strip(), (dlast or "").strip()] if p
@@ -149,4 +155,46 @@ def sales_rows(request: Request, db: Session = Depends(get_db)):
             }
         )
 
+    if unmapped:
+        top = sorted(unmapped.items(), key=lambda kv: -kv[1]["count"])
+        print(
+            f"[sales_rows] {len(unmapped)} unmapped item code(s) defaulted to group 16 "
+            f"(needs classifying in product_groups.py): "
+            + ", ".join(f"{k}({v['count']})" for k, v in top)
+        )
+
     return JSONResponse(rows)
+
+
+@router.get("/api/dashboard/unmapped-items", include_in_schema=False)
+def unmapped_items(request: Request, db: Session = Depends(get_db)):
+    """รายงานรหัสสินค้าที่ยังไม่ถูกจัดกลุ่มใน product_groups.ITEM_TO_GROUP (จึงตกกลุ่ม 16
+    อัตโนมัติ) — ใช้แทนกลุ่ม "อื่นๆ" เดิมที่ยกเลิกไป เพื่อเตือนว่ามีรหัสใหม่ต้องเพิ่มลง map.
+    คืน {count, items:[{itemId, itemName, count, value}]} เรียงตามจำนวนรายการมาก→น้อย."""
+    if not request.session.get("user"):
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    itm = models.InvoiceItem
+    value_expr = func.coalesce(itm.amount, itm.quantity * itm.cf_itempricelevel_price)
+    agg = (
+        db.query(
+            itm.cf_itemid,
+            func.max(itm.cf_itemname).label("name"),
+            func.count(itm.idx).label("cnt"),
+            func.coalesce(func.sum(value_expr), 0).label("val"),
+        )
+        .group_by(itm.cf_itemid)
+        .all()
+    )
+    items = [
+        {
+            "itemId": cf_itemid,
+            "itemName": name,
+            "count": int(cnt or 0),
+            "value": round(float(val or 0), 2),
+        }
+        for cf_itemid, name, cnt, val in agg
+        if not is_known(cf_itemid)
+    ]
+    items.sort(key=lambda x: (-x["count"], -x["value"]))
+    return JSONResponse({"count": len(items), "items": items})
