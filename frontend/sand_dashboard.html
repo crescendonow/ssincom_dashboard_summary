@@ -175,12 +175,38 @@
     cursor: pointer;
     font-size: 20px;
   }
-  @media (max-width: 768px) {
-    .sidebar { transform: translateX(-100%); }
+  /* ≤1024px (iPad แนวตั้ง/แนวนอน + มือถือ): sidebar เป็น off-canvas เพื่อคืนพื้นที่เต็มจอ
+     ให้ตารางข้อมูลกว้างๆ (ปี×เดือน 12 คอลัมน์) — breakpoint นี้ต้องตรงกับค่าใน toggleSidebar/showTab */
+  @media (max-width: 1024px) {
+    .sidebar { transform: translateX(-100%); box-shadow: 4px 0 24px rgba(0,0,0,.35); }
     .sidebar.open { transform: translateX(0); }
     .main-content { margin-left: 0; }
     .sidebar-toggle { display: block; }
     .topbar { padding-left: 64px; }
+    main { padding: 16px; }
+
+    /* ตารางกว้างเลื่อนแนวนอนใน .table-card — ตรึงคอลัมน์แรก (ปี/ชื่อสินค้า/ลูกค้า)
+       ให้รู้ว่ากำลังดูแถวไหนอยู่ ยกเว้นเซลล์ colspan (แถวรวมบางแถว) ที่ตรึงแล้วจะบังเพื่อน */
+    .table-card table th:first-child:not([colspan]),
+    .table-card table td:first-child:not([colspan]) {
+      position: sticky; left: 0; z-index: 2;
+      box-shadow: 2px 0 4px -2px rgba(0,0,0,.25);
+    }
+    .table-card thead th:first-child { z-index: 3; }
+    .table-card tbody td:first-child, .table-card tbody th:first-child { background: var(--card); }
+    .table-card tbody tr:nth-child(even) td:first-child { background: #f8f9fa; }
+    .table-card tbody tr:hover td:first-child { background: #e8f0fe; }
+    .table-card tfoot td:first-child { background: #e8f0fe; }
+    /* ตัด padding ข้างการ์ดออก ไม่งั้นเนื้อหาที่เลื่อนจะลอดออกมาโผล่ในแถบ padding
+       ด้านซ้ายของคอลัมน์ที่ตรึงไว้ — ส่วนหัวข้อ/หมายเหตุใส่ padding คืนรายตัว */
+    .table-card { padding-left: 0; padding-right: 0; }
+    .table-card > h3, .table-card > p, .table-card > .heat-scale,
+    .table-card > .pager, .table-card > .exec-note, .table-card > .chart-grid,
+    .table-card > .filter-bar, .table-card > .action-bar {
+      margin-left: 14px; margin-right: 14px;
+      /* การ์ดทั้งใบคือตัวเลื่อนแนวนอน — ตรึงหัวข้อ/หมายเหตุไว้ไม่ให้เลื่อนหายไปกับตาราง */
+      position: sticky; left: 0;
+    }
   }
   
   .tab-panel { display: none; }
@@ -351,10 +377,30 @@
   .pivot-subheader { background: #2d3561 !important; font-size: .8rem !important; }
   .pivot-total { background: #e8f0fe !important; font-weight: 700; border-top: 2px solid var(--primary); }
   
+  /* ≤600px (สมาร์ทโฟน): ลด padding/ฟอนต์ให้ข้อมูลแสดงได้มากขึ้นต่อจอ */
   @media (max-width: 600px) {
-    main { padding: 12px; }
-    .chart-grid { grid-template-columns: 1fr; }
-    .kpi-grid { grid-template-columns: 1fr 1fr; }
+    main { padding: 10px; }
+    .chart-grid { grid-template-columns: 1fr; gap: 12px; }
+    .kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+    .kpi-card { padding: 14px; }
+    .kpi-card .value { font-size: 1.15rem; }
+    .kpi-card .label { font-size: .7rem; }
+    .chart-card, .filter-bar { padding: 12px; border-radius: 10px; }
+    /* ห้ามคืน padding ข้างให้ .table-card — บล็อก ≤1024px ตัดออกเพื่อให้คอลัมน์ตรึงชิดขอบการ์ด */
+    .table-card { padding: 12px 0; border-radius: 10px; }
+    .chart-card .chart-wrap { height: 240px; }
+    table { font-size: .78rem; }
+    thead th, td { padding: 7px 9px; }
+    .topbar { padding: 10px 12px 10px 60px; }
+    .topbar-left h1 { font-size: .98rem; }
+    .topbar-left p { font-size: .72rem; }
+    /* select เต็มแถวกดง่ายบนจอสัมผัส */
+    .filter-bar select, .filter-bar input[type=text] { flex: 1 1 130px; min-width: 0; }
+    .btn { padding: 8px 12px; font-size: .82rem; }
+  }
+  /* จอแคบมาก: KPI เรียงคอลัมน์เดียว กันตัวเลขยาว (ร้อยล้านบาท) ล้นการ์ด */
+  @media (max-width: 380px) {
+    .kpi-grid { grid-template-columns: 1fr; }
   }
 
   /* ===== แท็บ ภาพรวมผู้บริหาร 10 ปี ===== */
@@ -1185,8 +1231,8 @@ function showTab(name, el) {
   const cyb = document.getElementById('closed-year-banner');
   if(cyb && name === 'exec') cyb.style.display = 'none';
   else updateClosedYearBanner();
-  // ปิด sidebar อัตโนมัติบนมือถือ
-  if(window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
+  // ปิด sidebar อัตโนมัติบนมือถือ/แท็บเล็ต (ต้องตรงกับ breakpoint 1024px ใน CSS)
+  if(window.innerWidth <= 1024) document.getElementById('sidebar').classList.remove('open');
 }
 
 function toggleSidebar() {
@@ -1197,7 +1243,7 @@ function toggleSidebar() {
 document.addEventListener('click', function(e) {
   const sidebar = document.getElementById('sidebar');
   const toggle = document.getElementById('sidebar-toggle');
-  if(window.innerWidth <= 768 && sidebar.classList.contains('open') &&
+  if(window.innerWidth <= 1024 && sidebar.classList.contains('open') &&
      !sidebar.contains(e.target) && !toggle.contains(e.target)) {
     sidebar.classList.remove('open');
   }
