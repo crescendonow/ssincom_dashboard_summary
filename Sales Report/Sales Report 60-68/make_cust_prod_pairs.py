@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 """v4: extract + normalize names (dedup-aware) + aggregate + emit JS constant.
 Builds on extract_v3 layout handling; adds customer-name normalization inside the dedup key
-(fixes 2565-05 double dump with/without บริษัท prefix)."""
+(fixes 2565-05 double dump with/without บริษัท prefix).
+
+NOTE: output keeps customers exactly as invoiced. The NPP4 rule (ทรายคัดพิเศษ 0.5-1.4 มม.
+ใช้จริงโดย NPP4 แต่ออกใบกำกับในนาม NPP3 — ข้อมูลจากผู้ใช้ 2 ส.ค. 2569) is applied at
+render time in sand_dashboard.html (block HCP_NPP4_IDX, matched by product/customer name),
+so regenerating this constant does not lose the reattribution."""
 import io, sys, re, json, zipfile, datetime, unicodedata, xml.etree.ElementTree as ET
 from collections import defaultdict
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
