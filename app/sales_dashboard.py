@@ -205,3 +205,154 @@ def unmapped_items(request: Request, db: Session = Depends(get_db)):
     ]
     items.sort(key=lambda x: (-x["count"], -x["value"]))
     return JSONResponse({"count": len(items), "items": items})
+
+
+# กลุ่ม 17 = "ถุง Big Bag ขนาด 1 ตัน" ขายเป็นใบ ไม่ใช่ตัน — ตัดออกจากยอดตันให้ตรงกับ dashboard
+BIGBAG_GROUP = 17
+
+
+@router.get("/api/dashboard/customer-branches", include_in_schema=False)
+def customer_branches(request: Request, db: Session = Depends(get_db)):
+    """รายงานการจำแนก "สำนักงานใหญ่ / สาขา" ของลูกค้า พร้อมกลุ่มสินค้าที่แต่ละหน่วยซื้อ.
+
+    ใช้ตรวจว่าการแยกสาขาทำงานถูกต้องบนข้อมูลจริง — dashboard แยกสาขาด้วย
+    products.customer_list.cf_hq/cf_branch (join ด้วย personid) ผ่าน clean_customer_name()
+    ซึ่งดูจากโค้ดอย่างเดียวไม่รู้ว่าข้อมูลจริงครบหรือเปล่า
+
+    คืน:
+      unmatched : ใบกำกับที่หา customer_list ไม่เจอ (cf_hq เป็น NULL) -> ไม่มี suffix สาขา
+                  ทั้งที่อาจเป็นสาขาจริง = พังเงียบ ถ้า rows > 0 แปลว่าจำแนกยังไม่ครบ
+      families  : ลูกค้าที่มีหลายหน่วย (สำนักงานใหญ่ + สาขา) จัดกลุ่มด้วยชื่อฐาน
+      singles   : ลูกค้าที่มีหน่วยเดียว
+    """
+    if not request.session.get("user"):
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    inv = models.Invoice
+    itm = models.InvoiceItem
+    cust = models.CustomerList
+
+    value_expr = func.coalesce(itm.amount, itm.quantity * itm.cf_itempricelevel_price)
+    rows = (
+        db.query(
+            inv.personid,
+            inv.fname,
+            cust.fname.label("cust_fname"),
+            cust.cf_hq,
+            cust.cf_branch,
+            itm.cf_itemid,
+            itm.quantity,
+            value_expr.label("value"),
+        )
+        .join(
+            itm,
+            or_(
+                itm.invoice_number == inv.invoice_number,
+                itm.invoice_number == cast(inv.idx, String),  # ⚠ quirk เดียวกับ /sales/rows
+            ),
+        )
+        .outerjoin(cust, inv.personid == cust.personid)
+        .filter(inv.invoice_date >= LIVE_DATA_START)
+        .all()
+    )
+
+    units: dict = {}
+    unmatched_rows = 0
+    unmatched_names: dict = {}
+
+    for personid, fname, cust_fname, cf_hq, cf_branch, cf_itemid, quantity, value in rows:
+        # ใช้ตัวเดียวกับ /sales/rows เสมอ — ถ้าเขียน logic ชื่อซ้ำ รายงานจะไม่ตรงกับที่ dashboard แสดง
+        display = clean_customer_name(cust_fname or fname, cf_hq, cf_branch)
+
+        if cf_hq is None:  # join ไม่ติด customer_list
+            unmatched_rows += 1
+            u = unmatched_names.setdefault(display, {"name": display, "personid": personid, "rows": 0})
+            u["rows"] += 1
+
+        qraw = float(quantity or 0.0)
+        qty_ton = qraw / 1000.0 if qraw >= 1000 else qraw
+        val = float(value or 0.0)
+        gid, gname = group_of(cf_itemid)
+
+        key = (personid, display)
+        unit = units.setdefault(
+            key,
+            {
+                "personid": personid,
+                "displayName": display,
+                "masterName": cust_fname,
+                "invoiceName": fname,
+                "isHQ": (cf_hq == 1) if cf_hq is not None else None,
+                "branch": cf_branch or None,
+                "matched": cf_hq is not None,
+                "rows": 0,
+                "tons": 0.0,
+                "value": 0.0,
+                "_groups": {},
+            },
+        )
+        unit["rows"] += 1
+        unit["value"] += val
+        if gid != BIGBAG_GROUP:
+            unit["tons"] += qty_ton
+        g = unit["_groups"].setdefault(
+            gid, {"groupId": gid, "groupName": gname, "rows": 0, "qty": 0.0, "value": 0.0}
+        )
+        g["rows"] += 1
+        g["qty"] += qty_ton
+        g["value"] += val
+
+    def finish(u: dict) -> dict:
+        groups = sorted(u.pop("_groups").values(), key=lambda x: -x["qty"])
+        for g in groups:
+            g["qty"] = round(g["qty"], 2)
+            g["value"] = round(g["value"], 2)
+            if g["groupId"] == BIGBAG_GROUP:
+                g["note"] = "ขายเป็นใบ ไม่นับเป็นตัน"
+        u["tons"] = round(u["tons"], 2)
+        u["value"] = round(u["value"], 2)
+        u["groups"] = groups
+        return u
+
+    all_units = [finish(u) for u in units.values()]
+
+    # จัดกลุ่มด้วย "ชื่อฐาน" = displayName ที่ตัด suffix " (สาขา …)" ออก
+    fams: dict = {}
+    for u in all_units:
+        base = u["displayName"].split(" (สาขา ")[0]
+        fams.setdefault(base, []).append(u)
+
+    families, singles = [], []
+    for base, us in sorted(fams.items()):
+        us.sort(key=lambda x: (x["isHQ"] is not True, x["branch"] or ""))
+        if len(us) > 1:
+            families.append(
+                {
+                    "base": base,
+                    "unitCount": len(us),
+                    "tons": round(sum(x["tons"] for x in us), 2),
+                    "value": round(sum(x["value"] for x in us), 2),
+                    "units": us,
+                }
+            )
+        else:
+            singles.append(us[0])
+
+    families.sort(key=lambda f: -f["value"])
+    singles.sort(key=lambda u: -u["value"])
+
+    return JSONResponse(
+        {
+            "since": LIVE_DATA_START.isoformat(),
+            "unmatched": {
+                "rows": unmatched_rows,
+                "customers": sorted(unmatched_names.values(), key=lambda x: -x["rows"]),
+                "hint": "cf_hq เป็น NULL = ใบกำกับหา products.customer_list ไม่เจอ (join ด้วย personid) "
+                        "จึงไม่ได้ต่อท้าย '(สาขา …)' ทั้งที่อาจเป็นสาขาจริง — ต้องเป็น 0",
+            },
+            "familyCount": len(families),
+            "families": families,
+            "singleCount": len(singles),
+            "singles": singles,
+        }
+    )

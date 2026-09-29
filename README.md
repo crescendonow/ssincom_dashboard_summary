@@ -47,7 +47,7 @@ Browser
   ├─ GET /api/auth/me    → {authenticated, user} (สำหรับ frontend เช็คสถานะ)
   ├─ GET /healthz        → {ok: true} (สำหรับ Railway health check)
   │
-  └─ static: /frontend/* (StaticFiles — เสิร์ฟ app.js, xlsx ฯลฯ)
+  └─ (ไม่มี static mount — ถอดออก 29 ก.ย. 2569: /frontend//sand_dashboard.html ฯลฯ เคยหลุด login gate)
 ```
 
 ### Request Flow
@@ -93,8 +93,7 @@ ssincom_dashboard_summary/
 ├── frontend/                     # Frontend (static HTML/JS)
 │   ├── sand_dashboard.html        # Dashboard หลัก (sidebar layout, 10 แท็บ, Chart.js)
 │   ├── login.html                # Login form (POST /login, next redirect)
-│   ├── app.js                    # (ไม่ถูกใช้โดย dashboard — ปล่อยไว้)
-│   └── รายงานยอดขายทราย_ม.ค.-พ.ค.2569.xlsx  # ต้นฉบับ EMBEDDED_DATA
+│   └── app.js                    # (ไม่ถูกใช้โดย dashboard — ปล่อยไว้)
 │
 ├── requirements.txt              # Python dependencies (pinned)
 ├── Procfile                      # web: uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -123,7 +122,6 @@ ssincom_dashboard_summary/
 | `/frontend/sand_dashboard.html` | GET | **gated** | เดียวกับ `/frontend/` |
 | `/healthz` | GET | public | `{ok: true}` — health check |
 | `/api/dashboard/sales/rows` | GET | **gated** | คืน line-item rows (ใน router) |
-| `/frontend/*` | static | public | StaticFiles (app.js, xlsx ฯลฯ) |
 
 **Session**: `SessionMiddleware` (itsdangerous) — `max_age=7200` (2 ชม.), secret = `SESSION_SECRET`.
 
@@ -233,7 +231,7 @@ ORDER BY inv.invoice_date ASC, inv.idx ASC, itm.idx ASC
 
 | ตัวแปร | ความหมาย | ขนาด |
 |---|---|---|
-| `EMBEDDED_DATA` | line-item snapshot จาก xlsx ม.ค.–พ.ค. 2569 (692 แถว) | ~214 KB |
+| `EMBEDDED_DATA` | line-item snapshot จาก `/api/dashboard/sales/rows` ม.ค.–ก.ย. 2569 (1,170 แถว, ณ `EMBEDDED_DATA_ASOF` 29/09/2569) | ~360 KB |
 | `HISTORICAL_VOLUME` | ปริมาณตัน ปี 2560–2568 `[ปี,เดือน,productIdx,ตัน]` | ~21 KB |
 | `HISTORICAL_SALES` | ยอดขายบาท ปี 2560–2568 `[ปี,เดือน,value,VAT,total]` | ~4 KB |
 

@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 .docs
+# พอร์ตลงทุนส่วนตัว — ห้ามขึ้น repo บริษัท / Railway (สำรองผ่าน Google Drive อยู่แล้ว)
+Investment/

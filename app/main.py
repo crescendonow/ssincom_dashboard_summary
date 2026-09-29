@@ -12,7 +12,6 @@ from urllib.parse import quote
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
-from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from .sales_dashboard import router as sales_router
@@ -121,5 +120,7 @@ async def healthz() -> dict:
 # data API (auth-gated ภายใน router)
 app.include_router(sales_router)
 
-# static ท้ายสุด (หลัง explicit routes) — เสิร์ฟ asset สาธารณะ เช่น app.js
-app.mount("/frontend", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+# ⚠ ห้าม mount StaticFiles ทับโฟลเดอร์ frontend/ — เคยมี แล้วพบว่า /frontend//sand_dashboard.html,
+# /frontend/sand_dashboard.html/ และ /frontend/./sand_dashboard.html หลุด route ที่ gate ไว้ข้างบน
+# ไปตกที่ StaticFiles (normalize path แล้วเจอไฟล์) → เสิร์ฟ dashboard พร้อมข้อมูลลูกค้าที่ฝังไว้โดยไม่ต้อง login
+# ไม่มีอะไรต้องใช้ static อยู่แล้ว: login.html/dashboard เสิร์ฟผ่าน route ตรง, asset ทั้งหมดมาจาก CDN
